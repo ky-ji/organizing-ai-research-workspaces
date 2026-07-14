@@ -43,7 +43,7 @@ class SkillContractTests(unittest.TestCase):
         contract_lines = [
             line
             for line in contract.splitlines()
-            if line.strip() and not line.strip().startswith("```")
+            if line.strip() and not line.strip().startswith(("```", "~~~"))
         ]
         self.assertEqual(
             contract_lines,
