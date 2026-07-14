@@ -40,19 +40,23 @@ class SkillContractTests(unittest.TestCase):
         )
         self.assertIsNotNone(contract_match)
         contract = contract_match.group(1)
-        for required_path in (
-            "projects/",
-            "shared/",
-            "datasets/",
-            "pretrained/",
-            "runs/",
-            "scratch/",
-        ):
-            with self.subTest(required_path=required_path):
-                self.assertIn(required_path, contract)
-        for forbidden_path in ("archived/", "artifacts/", "models/"):
-            with self.subTest(forbidden_path=forbidden_path):
-                self.assertNotIn(forbidden_path, contract)
+        contract_lines = [
+            line
+            for line in contract.splitlines()
+            if line.strip() and not line.strip().startswith("```")
+        ]
+        self.assertEqual(
+            contract_lines,
+            [
+                "research/",
+                "├── projects/",
+                "├── shared/",
+                "│   ├── datasets/",
+                "│   └── pretrained/",
+                "├── runs/",
+                "└── scratch/",
+            ],
+        )
 
     def test_skill_contains_operational_contract_and_stays_concise(self):
         skill_contents = self._read_required(SKILL_ROOT / "SKILL.md")
@@ -62,9 +66,12 @@ class SkillContractTests(unittest.TestCase):
             "paper-runs.yaml",
             "KEEP",
             "RESEARCH_ROOT",
+            "PROJECTS_ROOT",
+            "SHARED_ROOT",
             "DATASETS_ROOT",
             "PRETRAINED_ROOT",
             "RUNS_ROOT",
+            "SCRATCH_ROOT",
             "world-writable",
             "sticky bit",
         ):
