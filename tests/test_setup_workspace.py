@@ -29,6 +29,8 @@ class SetupWorkspaceTests(unittest.TestCase):
             home.mkdir()
             root = home / "research"
             env_file = home / "config" / "env.sh"
+            canonical_root = root.expanduser().resolve()
+            canonical_env_file = env_file.expanduser().resolve()
             process_env = os.environ.copy()
             process_env["HOME"] = str(home)
 
@@ -42,8 +44,10 @@ class SetupWorkspaceTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn(f"CREATE {root / 'projects'}", result.stdout)
-            self.assertIn(f"WRITE {env_file}", result.stdout)
+            self.assertIn(
+                f"CREATE {canonical_root / 'projects'}", result.stdout
+            )
+            self.assertIn(f"WRITE {canonical_env_file}", result.stdout)
             self.assertFalse(root.exists())
             self.assertFalse(env_file.exists())
             self.assertFalse(env_file.parent.exists())
@@ -53,6 +57,7 @@ class SetupWorkspaceTests(unittest.TestCase):
             temporary_path = Path(temporary_directory)
             root = temporary_path / "research"
             env_file = temporary_path / "config" / "env.sh"
+            canonical_root = root.expanduser().resolve()
 
             result = self._run("--root", root, "--env-file", env_file)
 
@@ -76,13 +81,19 @@ class SetupWorkspaceTests(unittest.TestCase):
             self.assertTrue(env_contents.endswith("\n"))
             env_lines = env_contents.splitlines()
             expected_exports = [
-                ("RESEARCH_ROOT", root),
-                ("PROJECTS_ROOT", root / "projects"),
-                ("SHARED_ROOT", root / "shared"),
-                ("DATASETS_ROOT", root / "shared" / "datasets"),
-                ("PRETRAINED_ROOT", root / "shared" / "pretrained"),
-                ("RUNS_ROOT", root / "runs"),
-                ("SCRATCH_ROOT", root / "scratch"),
+                ("RESEARCH_ROOT", canonical_root),
+                ("PROJECTS_ROOT", canonical_root / "projects"),
+                ("SHARED_ROOT", canonical_root / "shared"),
+                (
+                    "DATASETS_ROOT",
+                    canonical_root / "shared" / "datasets",
+                ),
+                (
+                    "PRETRAINED_ROOT",
+                    canonical_root / "shared" / "pretrained",
+                ),
+                ("RUNS_ROOT", canonical_root / "runs"),
+                ("SCRATCH_ROOT", canonical_root / "scratch"),
             ]
             self.assertEqual(len(env_lines), 7)
             for line, (name, value) in zip(env_lines, expected_exports):
@@ -96,6 +107,7 @@ class SetupWorkspaceTests(unittest.TestCase):
             root = temporary_path / "research"
             env_file = temporary_path / "research.env"
             shell_rc = temporary_path / ".bashrc"
+            canonical_root = root.expanduser().resolve()
             env_file.write_text("STALE_ENV_CONTENT\n", encoding="utf-8")
             original_rc = "# existing shell content\nexport PATH=\"$HOME/bin:$PATH\"\n"
             shell_rc.write_text(original_rc, encoding="utf-8")
@@ -115,13 +127,19 @@ class SetupWorkspaceTests(unittest.TestCase):
             expected_env_contents = "".join(
                 f"export {name}={shlex.quote(str(value))}\n"
                 for name, value in (
-                    ("RESEARCH_ROOT", root),
-                    ("PROJECTS_ROOT", root / "projects"),
-                    ("SHARED_ROOT", root / "shared"),
-                    ("DATASETS_ROOT", root / "shared" / "datasets"),
-                    ("PRETRAINED_ROOT", root / "shared" / "pretrained"),
-                    ("RUNS_ROOT", root / "runs"),
-                    ("SCRATCH_ROOT", root / "scratch"),
+                    ("RESEARCH_ROOT", canonical_root),
+                    ("PROJECTS_ROOT", canonical_root / "projects"),
+                    ("SHARED_ROOT", canonical_root / "shared"),
+                    (
+                        "DATASETS_ROOT",
+                        canonical_root / "shared" / "datasets",
+                    ),
+                    (
+                        "PRETRAINED_ROOT",
+                        canonical_root / "shared" / "pretrained",
+                    ),
+                    ("RUNS_ROOT", canonical_root / "runs"),
+                    ("SCRATCH_ROOT", canonical_root / "scratch"),
                 )
             ).encode("utf-8")
             self.assertEqual(first_env_contents, expected_env_contents)
@@ -147,22 +165,41 @@ class SetupWorkspaceTests(unittest.TestCase):
                 self.assertNotIn(action, second_result.stdout)
 
     def test_file_collision_fails_before_creating_directories(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            temporary_path = Path(temporary_directory)
-            root = temporary_path / "research"
-            env_file = temporary_path / "research.env"
-            root.mkdir()
-            runs_file = root / "runs"
-            original_runs_contents = b"occupied\n"
-            runs_file.write_bytes(original_runs_contents)
+        with self.subTest("required directory is a file"):
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                temporary_path = Path(temporary_directory)
+                root = temporary_path / "research"
+                env_file = temporary_path / "research.env"
+                root.mkdir()
+                runs_file = root / "runs"
+                original_runs_contents = b"occupied\n"
+                runs_file.write_bytes(original_runs_contents)
 
-            result = self._run("--root", root, "--env-file", env_file)
+                result = self._run("--root", root, "--env-file", env_file)
 
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("required directory is a file", result.stderr)
-            self.assertEqual(set(root.iterdir()), {runs_file})
-            self.assertEqual(runs_file.read_bytes(), original_runs_contents)
-            self.assertFalse(env_file.exists())
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("required directory is a file", result.stderr)
+                self.assertEqual(set(root.iterdir()), {runs_file})
+                self.assertEqual(
+                    runs_file.read_bytes(), original_runs_contents
+                )
+                self.assertFalse(env_file.exists())
+
+        with self.subTest("output aliases required directory"):
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                temporary_path = Path(temporary_directory)
+                real_root = temporary_path / "real-research"
+                alias_root = temporary_path / "research-alias"
+                real_root.mkdir()
+                alias_root.symlink_to(real_root, target_is_directory=True)
+                env_file = real_root / "projects"
+
+                result = self._run(
+                    "--root", alias_root, "--env-file", env_file
+                )
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(list(real_root.iterdir()), [])
 
     def test_setup_without_shell_rc_leaves_bashrc_unchanged(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

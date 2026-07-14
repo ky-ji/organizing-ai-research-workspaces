@@ -17,7 +17,7 @@ class WorkspaceError(Exception):
 
 
 def _resolved_path(value: str) -> Path:
-    return Path(value).expanduser().absolute()
+    return Path(value).expanduser().resolve()
 
 
 def _workspace_paths(root: Path) -> list[tuple[str, Path]]:
