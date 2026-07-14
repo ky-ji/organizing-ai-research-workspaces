@@ -201,6 +201,28 @@ class SetupWorkspaceTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(list(real_root.iterdir()), [])
 
+        with self.subTest("nested output aliases required directory"):
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                temporary_path = Path(temporary_directory)
+                root = temporary_path / "research"
+                external_shared = temporary_path / "external-shared"
+                root.mkdir()
+                external_shared.mkdir()
+                shared_link = root / "shared"
+                shared_link.symlink_to(
+                    external_shared, target_is_directory=True
+                )
+                env_file = external_shared / "datasets"
+
+                result = self._run(
+                    "--root", root, "--env-file", env_file
+                )
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(set(root.iterdir()), {shared_link})
+                self.assertTrue(shared_link.is_symlink())
+                self.assertEqual(list(external_shared.iterdir()), [])
+
     def test_setup_without_shell_rc_leaves_bashrc_unchanged(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary_path = Path(temporary_directory)

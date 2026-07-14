@@ -70,10 +70,12 @@ def _updated_shell_contents(existing: str, block: str) -> str:
     return f"{existing[:start.start()]}{block}{existing[end.end():]}"
 
 
-def _preflight_output(path: Path, required_directories: list[Path]) -> None:
+def _preflight_output(
+    path: Path, canonical_required_directories: list[Path]
+) -> None:
     if any(
         path == directory or path in directory.parents
-        for directory in required_directories
+        for directory in canonical_required_directories
     ):
         raise WorkspaceError(f"output path conflicts with required directory: {path}")
     path_exists = path.exists() or path.is_symlink()
@@ -121,9 +123,12 @@ def _run(args: argparse.Namespace) -> None:
                 f"required directory is a file: {directory}"
             )
 
-    _preflight_output(env_file, required_directories)
+    canonical_required_directories = [
+        directory.resolve() for directory in required_directories
+    ]
+    _preflight_output(env_file, canonical_required_directories)
     if shell_rc is not None:
-        _preflight_output(shell_rc, required_directories)
+        _preflight_output(shell_rc, canonical_required_directories)
         if (
             env_file == shell_rc
             or env_file in shell_rc.parents
