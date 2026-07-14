@@ -13,9 +13,9 @@ Keep the logical structure small and make every paper result traceable by refere
 
 1. Inspect before mutating: identify the user, mounts, filesystems, free space, inode usage, ownership, mode, ACLs, bind mounts, symlinks, and actual write access.
 2. Choose the safest currently writable root with adequate capacity. Treat root-owned empty disks as unavailable until a user-owned directory exists.
-3. Present the mapping and tradeoffs. Require confirmation before destructive cleanup or changing shared permissions.
-4. Create the contract with `scripts/setup_workspace.py`.
-5. Verify structure, environment variables, filesystem identity, ownership, and a second idempotent run.
+3. Present the mapping, risks, and tradeoffs. For audit-only requests, report the mapping and risks, then stop.
+4. Run setup only when the user requests setup or apply. Require confirmation before destructive cleanup or changing shared permissions.
+5. Create the contract with the bundled setup script, then verify structure, environment variables, filesystem identity, ownership, and a second idempotent run.
 
 ## Directory Contract
 
@@ -45,7 +45,7 @@ projects/<project>/
 └── .gitignore
 ~~~
 
-Add `tests/` or `notebooks/` only when the project needs them. Keep one canonical copy of shared datasets and externally obtained pretrained weights under `shared/`. Treat `scratch/` as disposable.
+Add `tests/` or `notebooks/` only when the project needs them. Keep one canonical location for each shared dataset and externally obtained pretrained weight under `shared/` within each workspace on each machine; do not interpret this as one global copy across machines. Treat `scratch/` as disposable.
 
 ## Runs and Checkpoints
 
@@ -69,16 +69,18 @@ Treat backups, archive trees, DVC, MLflow, W&B, object storage, and model regist
 
 ## Example
 
-After confirming that home is the safe large filesystem, run:
+After confirming that home is the safe large filesystem, set `SKILL_DIR` to the absolute directory containing this `SKILL.md`, using the path by which the skill was loaded. Do not assume the current working directory. Then run:
 
 ~~~bash
-python3 scripts/setup_workspace.py \
+python3 "$SKILL_DIR/scripts/setup_workspace.py" \
   --root "$HOME/research" \
-  --env-file "$HOME/.config/research-workspace/env.sh" \
-  --shell-rc "$HOME/.bashrc"
+  --env-file "$HOME/.config/research-workspace/env.sh"
+. "$HOME/.config/research-workspace/env.sh"
 ~~~
 
-Then verify `findmnt -T "$RUNS_ROOT"`, `namei -l "$RUNS_ROOT"`, and run the setup command again. Require the second run to report only `UNCHANGED` actions.
+Keep `--shell-rc` as an explicit opt-in. Omit it by default; identify the user's shell and correct startup file before adding it.
+
+Source the env file before checking variables. The `findmnt -T "$RUNS_ROOT"` and `namei -l "$RUNS_ROOT"` checks are Linux-only; use platform equivalents elsewhere. Run the setup command again and require it to report only `UNCHANGED` actions.
 
 ## Quick Reference
 

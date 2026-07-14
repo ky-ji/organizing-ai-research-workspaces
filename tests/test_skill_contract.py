@@ -80,9 +80,40 @@ class SkillContractTests(unittest.TestCase):
             "SCRATCH_ROOT",
             "world-writable",
             "sticky bit",
+            "For audit-only requests, report the mapping and risks, then stop.",
+            "Run setup only when the user requests setup or apply.",
+            "absolute directory containing this `SKILL.md`",
+            "Do not assume the current working directory",
+            "identify the user's shell",
+            "explicit opt-in",
+            "Linux-only",
+            "within each workspace on each machine",
         ):
             with self.subTest(required_text=required_text):
                 self.assertIn(required_text, skill_contents)
+
+        example_match = re.search(
+            r"## Example\n(?P<example>.*?)(?=\n## )",
+            skill_contents,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(example_match)
+        example = example_match.group("example")
+        setup_block_match = re.search(
+            r"~~~bash\n(?P<code>.*?)\n~~~", example, re.DOTALL
+        )
+        self.assertIsNotNone(setup_block_match)
+        setup_code = setup_block_match.group("code")
+        self.assertIn(
+            'python3 "$SKILL_DIR/scripts/setup_workspace.py"', setup_code
+        )
+        self.assertNotIn("--shell-rc", setup_code)
+        source_position = example.find(
+            '. "$HOME/.config/research-workspace/env.sh"'
+        )
+        linux_check_position = example.find('findmnt -T "$RUNS_ROOT"')
+        self.assertGreaterEqual(source_position, 0)
+        self.assertGreater(linux_check_position, source_position)
         self.assertLessEqual(len(skill_contents.split()), 800)
 
     def test_openai_agent_metadata_references_the_skill(self):
