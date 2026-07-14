@@ -1,4 +1,5 @@
 import re
+import shlex
 import unittest
 from pathlib import Path, PureWindowsPath
 from urllib.parse import unquote
@@ -143,9 +144,19 @@ class ReadmeContractTests(unittest.TestCase):
             line_index += 1
 
         self.assertGreaterEqual(len(setup_calls), 3)
-        self.assertIn("--dry-run", setup_calls[0][0])
-        self.assertNotIn("--dry-run", setup_calls[1][0])
-        self.assertNotIn("--dry-run", setup_calls[2][0])
+        setup_tokens = []
+        for call_text, _, _ in setup_calls[:3]:
+            normalized_call = re.sub(r"\\\r?\n[ \t]*", " ", call_text)
+            normalized_call = " ".join(normalized_call.split())
+            setup_tokens.append(shlex.split(normalized_call))
+        self.assertIn("--dry-run", setup_tokens[0])
+        self.assertNotIn("--dry-run", setup_tokens[1])
+        self.assertNotIn("--dry-run", setup_tokens[2])
+        first_apply_tokens = [
+            token for token in setup_tokens[0] if token != "--dry-run"
+        ]
+        self.assertEqual(first_apply_tokens, setup_tokens[1])
+        self.assertEqual(setup_tokens[1], setup_tokens[2])
         source_match = re.search(
             r'(?m)^(?:source|\.) "\$HOME/\.config/research-workspace/env\.sh"[ \t]*$',
             quick_start_code,
@@ -164,15 +175,27 @@ class ReadmeContractTests(unittest.TestCase):
                 self.assertIn(required_text, readme)
         for policy_pattern in (
             r"(?im)^.*\b(?:retain|keep)\b[^\n]*`last`[^\n]*\bbest\b[^\n]*$",
-            r"(?im)^(?=[^\n]*\b(?:do not|don't|never|no|not|without|avoid)\b)"
-            r"(?=[^\n]*\bpaper[- ]model\b)"
-            r"(?=[^\n]*\b(?:copy|copies|duplicate|duplicates|duplicated|duplication)\b)"
-            r"[^\n]+$",
-            r"(?im)^(?=[^\n]*\bmodel registr(?:y|ies)\b)"
-            r"(?=[^\n]*\b(?:default|by default)\b)"
-            r"(?=[^\n]*\b(?:do not|don't|never|no|not|without)\b)[^\n]+$",
-            r"(?im)^.*\bworld-writable\b[^\n]*\bsticky bit\b[^\n]*$",
-            r"(?im)^.*\baudit\b[^\n]*\bbefore\b[^\n]*\bapply\b[^\n]*$",
+            r"(?i)\b(?:(?:do not|don't|never)\s+"
+            r"(?:create|make|add|use)|avoid\s+"
+            r"(?:creating|making|adding|using))\b[^.\n]*"
+            r"\bpaper[- ]model\b[^.\n]*"
+            r"\b(?:copy|copies|duplicate|duplicates|duplication)\b",
+            r"(?i)\b(?:(?:do not|don't|never)\s+"
+            r"(?:create|make|add|use)|avoid\s+"
+            r"(?:creating|making|adding|using))\b"
+            r"(?=[^.\n]*\bmodel registr(?:y|ies)\b)"
+            r"(?=[^.\n]*\b(?:default|by default)\b)[^.\n]*",
+            r"(?i)\b(?:(?:do not|don't|never)\s+"
+            r"(?:place|store|use|write)|avoid\s+"
+            r"(?:placing|storing|using|writing))\b"
+            r"(?=[^.\n]*\bworld-writable\b)"
+            r"(?=[^.\n]*\bcheckpoints?\b)"
+            r"(?=[^.\n]*(?:(?:without|no|lacks?)\b[^.\n]*\bsticky bit\b|"
+            r"\bsticky bit\b[^.\n]*\b(?:missing|absent|unset)\b))[^.\n]*",
+            r"(?i)\b(?:use|follow|start|begin|perform)\b"
+            r"(?=[^.\n]*\bworkflow\b)[^.\n]*"
+            r"\baudit(?:ing)?\b[^.\n]*\bbefore\b[^.\n]*"
+            r"\bappl(?:y|ying)\b",
         ):
             with self.subTest(policy_pattern=policy_pattern):
                 self.assertRegex(readme, policy_pattern)
