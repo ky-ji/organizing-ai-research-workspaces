@@ -1,6 +1,6 @@
 import re
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from urllib.parse import unquote
 
 
@@ -19,7 +19,6 @@ class ReadmeContractTests(unittest.TestCase):
         self.assertRegex(
             readme, r"(?m)^# Organizing AI Research Workspaces[ \t]*$"
         )
-        self.assertRegex(readme, r"[\u3400-\u4dbf\u4e00-\u9fff]")
         required_sections = (
             "Why this exists",
             "The four-root workspace",
@@ -35,12 +34,28 @@ class ReadmeContractTests(unittest.TestCase):
             "Contributing",
             "License",
         )
+        section_positions = []
         for section_name in required_sections:
             with self.subTest(section_name=section_name):
-                self.assertRegex(
-                    readme,
+                section_match = re.search(
                     rf"(?m)^## {re.escape(section_name)}[ \t]*$",
+                    readme,
                 )
+                self.assertIsNotNone(section_match)
+                if section_match is not None:
+                    section_positions.append(section_match.start())
+        self.assertEqual(len(section_positions), len(required_sections))
+        self.assertTrue(
+            all(
+                earlier < later
+                for earlier, later in zip(section_positions, section_positions[1:])
+            ),
+            "README sections must appear in the documented narrative order",
+        )
+        first_level_two_heading = re.search(r"(?m)^##[ \t]+", readme)
+        self.assertIsNotNone(first_level_two_heading)
+        preamble = readme[: first_level_two_heading.start()]
+        self.assertRegex(preamble, r"[\u3400-\u4dbf\u4e00-\u9fff]")
 
         workspace_section_match = re.search(
             r"(?ms)^## The four-root workspace[ \t]*\n"
@@ -98,24 +113,69 @@ class ReadmeContractTests(unittest.TestCase):
             quick_start_code,
         )
         self.assertIn("--dry-run", quick_start_code)
-        self.assertGreaterEqual(quick_start_code.count('python3 "$SETUP_SCRIPT"'), 3)
-        self.assertRegex(
-            quick_start_code,
+        setup_calls = []
+        code_lines = quick_start_code.splitlines(keepends=True)
+        line_positions = []
+        position = 0
+        for line in code_lines:
+            line_positions.append(position)
+            position += len(line)
+        line_index = 0
+        while line_index < len(code_lines):
+            command_line = code_lines[line_index].rstrip("\r\n")
+            if not re.match(
+                r'^[ \t]*python3 "\$SETUP_SCRIPT"(?=$|[ \t])', command_line
+            ):
+                line_index += 1
+                continue
+            call_lines = [command_line]
+            call_position = line_positions[line_index]
+            while call_lines[-1].rstrip().endswith("\\"):
+                line_index += 1
+                self.assertLess(
+                    line_index,
+                    len(code_lines),
+                    "continued setup call is missing its next line",
+                )
+                call_lines.append(code_lines[line_index].rstrip("\r\n"))
+            call_end = line_positions[line_index] + len(code_lines[line_index])
+            setup_calls.append(("\n".join(call_lines), call_position, call_end))
+            line_index += 1
+
+        self.assertGreaterEqual(len(setup_calls), 3)
+        self.assertIn("--dry-run", setup_calls[0][0])
+        self.assertNotIn("--dry-run", setup_calls[1][0])
+        self.assertNotIn("--dry-run", setup_calls[2][0])
+        source_match = re.search(
             r'(?m)^(?:source|\.) "\$HOME/\.config/research-workspace/env\.sh"[ \t]*$',
+            quick_start_code,
         )
+        self.assertIsNotNone(source_match)
+        self.assertLessEqual(setup_calls[1][2], source_match.start())
+        self.assertLess(source_match.start(), setup_calls[2][1])
         self.assertNotIn("--shell-rc", quick_start_code)
 
         for required_text in (
             "$RUNS_ROOT/<project>/<run-id>/checkpoints/",
             "results/paper-runs.yaml",
             "KEEP",
-            "Retain `last` plus the best one or few checkpoints",
-            "Do not create a separate paper-model copy",
-            "world-writable directory without the sticky bit",
-            "audit before apply",
         ):
             with self.subTest(required_text=required_text):
                 self.assertIn(required_text, readme)
+        for policy_pattern in (
+            r"(?im)^.*\b(?:retain|keep)\b[^\n]*`last`[^\n]*\bbest\b[^\n]*$",
+            r"(?im)^(?=[^\n]*\b(?:do not|don't|never|no|not|without|avoid)\b)"
+            r"(?=[^\n]*\bpaper[- ]model\b)"
+            r"(?=[^\n]*\b(?:copy|copies|duplicate|duplicates|duplicated|duplication)\b)"
+            r"[^\n]+$",
+            r"(?im)^(?=[^\n]*\bmodel registr(?:y|ies)\b)"
+            r"(?=[^\n]*\b(?:default|by default)\b)"
+            r"(?=[^\n]*\b(?:do not|don't|never|no|not|without)\b)[^\n]+$",
+            r"(?im)^.*\bworld-writable\b[^\n]*\bsticky bit\b[^\n]*$",
+            r"(?im)^.*\baudit\b[^\n]*\bbefore\b[^\n]*\bapply\b[^\n]*$",
+        ):
+            with self.subTest(policy_pattern=policy_pattern):
+                self.assertRegex(readme, policy_pattern)
 
     def test_internal_markdown_links_resolve(self):
         readme = self._read_readme()
@@ -136,11 +196,24 @@ class ReadmeContractTests(unittest.TestCase):
             internal_targets.append(target)
 
         self.assertTrue(internal_targets, "README must contain an internal link")
+        repository_root = REPO_ROOT.resolve()
         for target in internal_targets:
             relative_target = unquote(target.split("#", 1)[0])
             with self.subTest(target=target):
+                target_path = Path(relative_target)
+                self.assertFalse(
+                    target_path.is_absolute()
+                    or PureWindowsPath(relative_target).is_absolute(),
+                    f"internal README link must be relative: {target}",
+                )
+                resolved_target = (repository_root / target_path).resolve()
                 self.assertTrue(
-                    (REPO_ROOT / relative_target).exists(),
+                    resolved_target == repository_root
+                    or repository_root in resolved_target.parents,
+                    f"internal README link escapes the repository: {target}",
+                )
+                self.assertTrue(
+                    resolved_target.exists(),
                     f"internal README link does not resolve: {target}",
                 )
 
