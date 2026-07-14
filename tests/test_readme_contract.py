@@ -192,7 +192,7 @@ class ReadmeContractTests(unittest.TestCase):
             r"(?=[^.\n]*\bcheckpoints?\b)"
             r"(?=[^.\n]*(?:(?:without|no|lacks?)\b[^.\n]*\bsticky bit\b|"
             r"\bsticky bit\b[^.\n]*\b(?:missing|absent|unset)\b))[^.\n]*",
-            r"(?i)\b(?:use|follow|start|begin|perform)\b"
+            r"(?i)\b(?:use|follow|start|begin|perform)s?\b"
             r"(?=[^.\n]*\bworkflow\b)[^.\n]*"
             r"\baudit(?:ing)?\b[^.\n]*\bbefore\b[^.\n]*"
             r"\bappl(?:y|ying)\b",
