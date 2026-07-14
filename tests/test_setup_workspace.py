@@ -253,6 +253,100 @@ class SetupWorkspaceTests(unittest.TestCase):
                 self.assertTrue(shared_link.is_symlink())
                 self.assertEqual(list(external_shared.iterdir()), [])
 
+        with self.subTest("required directories share canonical target"):
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                temporary_path = Path(temporary_directory)
+                root = temporary_path / "research"
+                external = temporary_path / "external"
+                root.mkdir()
+                external.mkdir()
+                projects_link = root / "projects"
+                runs_link = root / "runs"
+                projects_link.symlink_to(
+                    external, target_is_directory=True
+                )
+                runs_link.symlink_to(external, target_is_directory=True)
+                env_file = temporary_path / "research.env"
+                shell_rc = temporary_path / ".bashrc"
+
+                result = self._run(
+                    "--root",
+                    root,
+                    "--env-file",
+                    env_file,
+                    "--shell-rc",
+                    shell_rc,
+                )
+
+                with self.subTest(check="canonical equality: nonzero exit"):
+                    self.assertNotEqual(result.returncode, 0)
+                with self.subTest(check="canonical equality: env absent"):
+                    self.assertFalse(env_file.exists())
+                with self.subTest(check="canonical equality: shell absent"):
+                    self.assertFalse(shell_rc.exists())
+                with self.subTest(check="canonical equality: root unchanged"):
+                    self.assertEqual(
+                        set(root.iterdir()), {projects_link, runs_link}
+                    )
+                with self.subTest(
+                    check="canonical equality: symlinks unchanged"
+                ):
+                    self.assertTrue(projects_link.is_symlink())
+                    self.assertTrue(runs_link.is_symlink())
+                with self.subTest(
+                    check="canonical equality: external unchanged"
+                ):
+                    self.assertEqual(list(external.iterdir()), [])
+
+        with self.subTest("required directories gain canonical ancestry"):
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                temporary_path = Path(temporary_directory)
+                root = temporary_path / "research"
+                external = temporary_path / "external"
+                nested = external / "nested"
+                root.mkdir()
+                nested.mkdir(parents=True)
+                projects_link = root / "projects"
+                runs_link = root / "runs"
+                projects_link.symlink_to(
+                    external, target_is_directory=True
+                )
+                runs_link.symlink_to(nested, target_is_directory=True)
+                env_file = temporary_path / "research.env"
+                shell_rc = temporary_path / ".bashrc"
+
+                result = self._run(
+                    "--root",
+                    root,
+                    "--env-file",
+                    env_file,
+                    "--shell-rc",
+                    shell_rc,
+                )
+
+                with self.subTest(
+                    check="canonical ancestry: nonzero exit"
+                ):
+                    self.assertNotEqual(result.returncode, 0)
+                with self.subTest(check="canonical ancestry: env absent"):
+                    self.assertFalse(env_file.exists())
+                with self.subTest(check="canonical ancestry: shell absent"):
+                    self.assertFalse(shell_rc.exists())
+                with self.subTest(check="canonical ancestry: root unchanged"):
+                    self.assertEqual(
+                        set(root.iterdir()), {projects_link, runs_link}
+                    )
+                with self.subTest(
+                    check="canonical ancestry: symlinks unchanged"
+                ):
+                    self.assertTrue(projects_link.is_symlink())
+                    self.assertTrue(runs_link.is_symlink())
+                with self.subTest(
+                    check="canonical ancestry: external unchanged"
+                ):
+                    self.assertEqual(set(external.iterdir()), {nested})
+                    self.assertEqual(list(nested.iterdir()), [])
+
     def test_setup_without_shell_rc_leaves_bashrc_unchanged(self):
         with self.subTest("shell rc is opt in"):
             with tempfile.TemporaryDirectory() as temporary_directory:

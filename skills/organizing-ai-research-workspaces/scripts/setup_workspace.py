@@ -74,6 +74,44 @@ def _updated_shell_contents(existing: str, block: str) -> str:
     return f"{existing[:start.start()]}{block}{existing[end.end():]}"
 
 
+def _preflight_required_directories(
+    required_directories: list[Path],
+) -> list[Path]:
+    for directory in required_directories:
+        if (
+            directory.exists() or directory.is_symlink()
+        ) and not directory.is_dir():
+            raise WorkspaceError(
+                f"required directory is a file: {directory}"
+            )
+
+    canonical_directories = [
+        directory.resolve() for directory in required_directories
+    ]
+    for left_index, left_logical in enumerate(required_directories):
+        left_canonical = canonical_directories[left_index]
+        for right_index in range(left_index + 1, len(required_directories)):
+            right_logical = required_directories[right_index]
+            right_canonical = canonical_directories[right_index]
+            if left_canonical == right_canonical:
+                raise WorkspaceError(
+                    "required directories resolve to the same path: "
+                    f"{left_logical} and {right_logical}"
+                )
+            if (
+                left_canonical in right_canonical.parents
+                and left_logical not in right_logical.parents
+            ) or (
+                right_canonical in left_canonical.parents
+                and right_logical not in left_logical.parents
+            ):
+                raise WorkspaceError(
+                    "required directories resolve to overlapping paths: "
+                    f"{left_logical} and {right_logical}"
+                )
+    return canonical_directories
+
+
 def _preflight_output(
     path: Path, canonical_required_directories: list[Path]
 ) -> None:
@@ -168,17 +206,9 @@ def _run(args: argparse.Namespace) -> None:
     workspace_paths = _workspace_paths(root)
     required_directories = [path for _, path in workspace_paths]
 
-    for directory in required_directories:
-        if (
-            directory.exists() or directory.is_symlink()
-        ) and not directory.is_dir():
-            raise WorkspaceError(
-                f"required directory is a file: {directory}"
-            )
-
-    canonical_required_directories = [
-        directory.resolve() for directory in required_directories
-    ]
+    canonical_required_directories = _preflight_required_directories(
+        required_directories
+    )
     _preflight_output(env_file, canonical_required_directories)
     if shell_rc is not None:
         _preflight_output(shell_rc, canonical_required_directories)
