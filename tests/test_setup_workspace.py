@@ -96,6 +96,7 @@ class SetupWorkspaceTests(unittest.TestCase):
             root = temporary_path / "research"
             env_file = temporary_path / "research.env"
             shell_rc = temporary_path / ".bashrc"
+            env_file.write_text("STALE_ENV_CONTENT\n", encoding="utf-8")
             original_rc = "# existing shell content\nexport PATH=\"$HOME/bin:$PATH\"\n"
             shell_rc.write_text(original_rc, encoding="utf-8")
 
@@ -111,6 +112,19 @@ class SetupWorkspaceTests(unittest.TestCase):
             self.assertEqual(first_result.returncode, 0, first_result.stderr)
             first_env_contents = env_file.read_bytes()
             first_rc_contents = shell_rc.read_bytes()
+            expected_env_contents = "".join(
+                f"export {name}={shlex.quote(str(value))}\n"
+                for name, value in (
+                    ("RESEARCH_ROOT", root),
+                    ("PROJECTS_ROOT", root / "projects"),
+                    ("SHARED_ROOT", root / "shared"),
+                    ("DATASETS_ROOT", root / "shared" / "datasets"),
+                    ("PRETRAINED_ROOT", root / "shared" / "pretrained"),
+                    ("RUNS_ROOT", root / "runs"),
+                    ("SCRATCH_ROOT", root / "scratch"),
+                )
+            ).encode("utf-8")
+            self.assertEqual(first_env_contents, expected_env_contents)
             self.assertIn(original_rc.encode("utf-8"), first_rc_contents)
             self.assertEqual(
                 first_rc_contents.count(b"# >>> research-workspace >>>"),
@@ -139,13 +153,15 @@ class SetupWorkspaceTests(unittest.TestCase):
             env_file = temporary_path / "research.env"
             root.mkdir()
             runs_file = root / "runs"
-            runs_file.write_text("occupied\n", encoding="utf-8")
+            original_runs_contents = b"occupied\n"
+            runs_file.write_bytes(original_runs_contents)
 
             result = self._run("--root", root, "--env-file", env_file)
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("required directory is a file", result.stderr)
             self.assertEqual(set(root.iterdir()), {runs_file})
+            self.assertEqual(runs_file.read_bytes(), original_runs_contents)
             self.assertFalse(env_file.exists())
 
     def test_setup_without_shell_rc_leaves_bashrc_unchanged(self):

@@ -40,11 +40,17 @@ class SkillContractTests(unittest.TestCase):
         )
         self.assertIsNotNone(contract_match)
         contract = contract_match.group(1)
-        contract_lines = [
-            line
-            for line in contract.splitlines()
-            if line.strip() and not line.strip().startswith(("```", "~~~"))
-        ]
+        contract_lines = [line for line in contract.splitlines() if line.strip()]
+        self.assertTrue(contract_lines)
+        opening = contract_lines[0].strip()
+        if opening.startswith(("```", "~~~")):
+            opening_match = re.fullmatch(r"(?P<fence>```|~~~)[^`~]*", opening)
+            self.assertIsNotNone(opening_match)
+            fence = opening_match.group("fence")
+            self.assertEqual(contract_lines[-1].strip(), fence)
+            contract_lines = contract_lines[1:-1]
+        for line in contract_lines:
+            self.assertFalse(line.strip().startswith(("```", "~~~")))
         self.assertEqual(
             contract_lines,
             [
