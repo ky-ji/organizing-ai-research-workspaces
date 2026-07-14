@@ -1,0 +1,4 @@
+interface:
+  display_name: "Organizing AI Research Workspaces"
+  short_description: "Simple, traceable AI research storage"
+  default_prompt: "Use $organizing-ai-research-workspaces to set up a simple, traceable research directory across my machines."
