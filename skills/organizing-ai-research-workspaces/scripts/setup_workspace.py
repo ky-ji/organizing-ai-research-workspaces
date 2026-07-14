@@ -2,14 +2,18 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import re
 import shlex
+import stat
 import sys
+import tempfile
 
 
 START_MARKER = "# >>> research-workspace >>>"
 END_MARKER = "# <<< research-workspace <<<"
+_MODE_UNSET = object()
 
 
 class WorkspaceError(Exception):
@@ -52,10 +56,10 @@ def _shell_block(env_file: Path) -> str:
 
 def _updated_shell_contents(existing: str, block: str) -> str:
     start_matches = list(
-        re.finditer(rf"(?m)^{re.escape(START_MARKER)}$", existing)
+        re.finditer(rf"(?m)^{re.escape(START_MARKER)}\r?$", existing)
     )
     end_matches = list(
-        re.finditer(rf"(?m)^{re.escape(END_MARKER)}$", existing)
+        re.finditer(rf"(?m)^{re.escape(END_MARKER)}\r?$", existing)
     )
     if not start_matches and not end_matches:
         separator = "" if not existing or existing.endswith("\n") else "\n"
@@ -92,7 +96,56 @@ def _preflight_output(
 def _read_existing(path: Path) -> str:
     if not path.exists():
         return ""
-    return path.read_text(encoding="utf-8")
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return handle.read()
+
+
+def _existing_mode(path: Path) -> int | None:
+    if not path.exists():
+        return None
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+def _atomic_write_text(
+    path: Path,
+    contents: str,
+    existing_mode: int | None | object = _MODE_UNSET,
+) -> None:
+    if existing_mode is _MODE_UNSET:
+        existing_mode = _existing_mode(path)
+
+    descriptor = None
+    temporary_path = None
+    try:
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        )
+        temporary_path = Path(temporary_name)
+        handle = os.fdopen(
+            descriptor, "w", encoding="utf-8", newline=""
+        )
+        descriptor = None
+        with handle:
+            handle.write(contents)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if isinstance(existing_mode, int):
+            os.chmod(temporary_path, existing_mode)
+        os.replace(temporary_path, path)
+    except BaseException:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink()
+            except OSError:
+                pass
+        raise
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -133,15 +186,23 @@ def _run(args: argparse.Namespace) -> None:
             env_file == shell_rc
             or env_file in shell_rc.parents
             or shell_rc in env_file.parents
+            or (
+                env_file.exists()
+                and shell_rc.exists()
+                and env_file.samefile(shell_rc)
+            )
         ):
             raise WorkspaceError("env file and shell rc paths conflict")
 
     desired_env = _env_contents(workspace_paths)
     existing_env = _read_existing(env_file)
+    existing_env_mode = _existing_mode(env_file)
     desired_shell = None
     existing_shell = None
+    existing_shell_mode = None
     if shell_rc is not None:
         existing_shell = _read_existing(shell_rc)
+        existing_shell_mode = _existing_mode(shell_rc)
         desired_shell = _updated_shell_contents(
             existing_shell, _shell_block(env_file)
         )
@@ -163,17 +224,17 @@ def _run(args: argparse.Namespace) -> None:
         directory.mkdir(parents=True, exist_ok=True)
     if existing_env != desired_env:
         env_file.parent.mkdir(parents=True, exist_ok=True)
-        env_file.write_text(desired_env, encoding="utf-8")
+        _atomic_write_text(env_file, desired_env, existing_env_mode)
     if shell_rc is not None and existing_shell != desired_shell:
         shell_rc.parent.mkdir(parents=True, exist_ok=True)
-        shell_rc.write_text(desired_shell, encoding="utf-8")
+        _atomic_write_text(shell_rc, desired_shell, existing_shell_mode)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
         _run(args)
-    except (WorkspaceError, OSError) as error:
+    except (WorkspaceError, OSError, UnicodeError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
     return 0

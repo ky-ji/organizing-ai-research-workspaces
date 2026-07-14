@@ -1,3 +1,4 @@
+import importlib.util
 import os
 import shlex
 import subprocess
@@ -5,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -201,6 +203,34 @@ class SetupWorkspaceTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(list(real_root.iterdir()), [])
 
+        with self.subTest("managed outputs share an inode"):
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                temporary_path = Path(temporary_directory)
+                root = temporary_path / "research"
+                env_file = temporary_path / "research.env"
+                shell_rc = temporary_path / ".bashrc"
+                sentinel = b"do not replace\n"
+                env_file.write_bytes(sentinel)
+                os.link(env_file, shell_rc)
+
+                result = self._run(
+                    "--root",
+                    root,
+                    "--env-file",
+                    env_file,
+                    "--shell-rc",
+                    shell_rc,
+                )
+
+                with self.subTest(check="nonzero exit"):
+                    self.assertNotEqual(result.returncode, 0)
+                with self.subTest(check="env sentinel unchanged"):
+                    self.assertEqual(env_file.read_bytes(), sentinel)
+                with self.subTest(check="shell sentinel unchanged"):
+                    self.assertEqual(shell_rc.read_bytes(), sentinel)
+                with self.subTest(check="workspace absent"):
+                    self.assertFalse(root.exists())
+
         with self.subTest("nested output aliases required directory"):
             with tempfile.TemporaryDirectory() as temporary_directory:
                 temporary_path = Path(temporary_directory)
@@ -224,30 +254,62 @@ class SetupWorkspaceTests(unittest.TestCase):
                 self.assertEqual(list(external_shared.iterdir()), [])
 
     def test_setup_without_shell_rc_leaves_bashrc_unchanged(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            temporary_path = Path(temporary_directory)
-            home = temporary_path / "home"
-            home.mkdir()
-            bashrc = home / ".bashrc"
-            original_bashrc = "# leave this file alone\n"
-            bashrc.write_text(original_bashrc, encoding="utf-8")
-            root = temporary_path / "research"
-            env_file = temporary_path / "research.env"
-            process_env = os.environ.copy()
-            process_env["HOME"] = str(home)
+        with self.subTest("shell rc is opt in"):
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                temporary_path = Path(temporary_directory)
+                home = temporary_path / "home"
+                home.mkdir()
+                bashrc = home / ".bashrc"
+                original_bashrc = "# leave this file alone\n"
+                bashrc.write_text(original_bashrc, encoding="utf-8")
+                root = temporary_path / "research"
+                env_file = temporary_path / "research.env"
+                process_env = os.environ.copy()
+                process_env["HOME"] = str(home)
 
-            result = self._run(
-                "--root",
-                root,
-                "--env-file",
-                env_file,
-                env=process_env,
-            )
+                result = self._run(
+                    "--root",
+                    root,
+                    "--env-file",
+                    env_file,
+                    env=process_env,
+                )
 
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(
-                bashrc.read_text(encoding="utf-8"), original_bashrc
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    bashrc.read_text(encoding="utf-8"), original_bashrc
+                )
+
+        with self.subTest("atomic write keeps old target on replace failure"):
+            spec = importlib.util.spec_from_file_location(
+                "setup_workspace_under_test", SCRIPT
             )
+            self.assertIsNotNone(spec)
+            self.assertIsNotNone(spec.loader)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            self.assertTrue(
+                hasattr(module, "_atomic_write_text"),
+                "atomic write helper is missing",
+            )
+            atomic_write = module._atomic_write_text
+
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                temporary_path = Path(temporary_directory)
+                target = temporary_path / "managed.env"
+                old_bytes = b"old managed content\n"
+                target.write_bytes(old_bytes)
+
+                with mock.patch.object(
+                    module.os,
+                    "replace",
+                    side_effect=OSError("injected replace failure"),
+                ):
+                    with self.assertRaises(OSError):
+                        atomic_write(target, "new managed content\n")
+
+                self.assertEqual(target.read_bytes(), old_bytes)
+                self.assertEqual(set(temporary_path.iterdir()), {target})
 
 
 if __name__ == "__main__":
