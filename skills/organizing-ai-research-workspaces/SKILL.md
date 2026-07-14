@@ -1,85 +1,95 @@
 ---
 name: organizing-ai-research-workspaces
-description: [TODO: Complete and informative explanation of what the skill does and when to use it. Include WHEN to use this skill - specific scenarios, file types, or tasks that trigger it.]
+description: Use when setting up, auditing, or simplifying AI/ML research storage across laptops, GitHub, GPU servers, or clusters, especially when projects share datasets and pretrained weights or produce many runs and checkpoints.
 ---
 
-# Organizing Ai Research Workspaces
+# Organizing AI Research Workspaces
 
 ## Overview
 
-[TODO: 1-2 sentences explaining what this skill enables]
+Keep the logical structure small and make every paper result traceable by reference. Separate Git projects, shared inputs, run outputs, and disposable scratch data without adding lifecycle hierarchies.
 
-## Structuring This Skill
+## Workflow
 
-[TODO: Choose the structure that best fits this skill's purpose. Common patterns:
+1. Inspect before mutating: identify the user, mounts, filesystems, free space, inode usage, ownership, mode, ACLs, bind mounts, symlinks, and actual write access.
+2. Choose the safest currently writable root with adequate capacity. Treat root-owned empty disks as unavailable until a user-owned directory exists.
+3. Present the mapping and tradeoffs. Require confirmation before destructive cleanup or changing shared permissions.
+4. Create the contract with `scripts/setup_workspace.py`.
+5. Verify structure, environment variables, filesystem identity, ownership, and a second idempotent run.
 
-**1. Workflow-Based** (best for sequential processes)
-- Works well when there are clear step-by-step procedures
-- Example: DOCX skill with "Workflow Decision Tree" -> "Reading" -> "Creating" -> "Editing"
-- Structure: ## Overview -> ## Workflow Decision Tree -> ## Step 1 -> ## Step 2...
+## Directory Contract
 
-**2. Task-Based** (best for tool collections)
-- Works well when the skill offers different operations/capabilities
-- Example: PDF skill with "Quick Start" -> "Merge PDFs" -> "Split PDFs" -> "Extract Text"
-- Structure: ## Overview -> ## Quick Start -> ## Task Category 1 -> ## Task Category 2...
+<!-- contract:start -->
+~~~text
+research/
+├── projects/
+├── shared/
+│   ├── datasets/
+│   └── pretrained/
+├── runs/
+└── scratch/
+~~~
+<!-- contract:end -->
 
-**3. Reference/Guidelines** (best for standards or specifications)
-- Works well for brand guidelines, coding standards, or requirements
-- Example: Brand styling with "Brand Guidelines" -> "Colors" -> "Typography" -> "Features"
-- Structure: ## Overview -> ## Guidelines -> ## Specifications -> ## Usage...
+Do not add active, submitted, published, deprecated, or archived project layers. Make each potential paper one Git repository directly under `projects/`. Use this minimal project shape:
 
-**4. Capabilities-Based** (best for integrated systems)
-- Works well when the skill provides multiple interrelated features
-- Example: Product Management with "Core Capabilities" -> numbered capability list
-- Structure: ## Overview -> ## Core Capabilities -> ### 1. Feature -> ### 2. Feature...
+~~~text
+projects/<project>/
+├── README.md
+├── src/
+├── configs/
+├── scripts/
+├── results/
+├── paper/
+├── pyproject.toml
+└── .gitignore
+~~~
 
-Patterns can be mixed and matched as needed. Most skills combine patterns (e.g., start with task-based, add workflow for complex operations).
+Add `tests/` or `notebooks/` only when the project needs them. Keep one canonical copy of shared datasets and externally obtained pretrained weights under `shared/`. Treat `scratch/` as disposable.
 
-Delete this entire "Structuring This Skill" section when done - it's just guidance.]
+## Runs and Checkpoints
 
-## [TODO: Replace with the first main section based on chosen structure]
+Use `runs/<project>/<run-id>/` with run IDs shaped as `YYYYMMDD-HHMM_<git-sha7>_<purpose>`. Keep resolved configuration, metadata, metrics, logs, and `runs/<project>/<run-id>/checkpoints/` together.
 
-[TODO: Add content here. See examples in existing skills:
-- Code samples for technical skills
-- Decision trees for complex workflows
-- Concrete examples with realistic user requests
-- References to scripts/templates/references as needed]
+Retain `last` plus the best one or few checkpoints. Keep a paper-selected model in its original run. Track only its run ID and relative checkpoint name in the project repository's `results/paper-runs.yaml`, and add a `KEEP` marker to that run. Do not create a separate paper-model copy by default.
 
-## Resources (optional)
+## Git Boundary
 
-Create only the resource directories this skill actually needs. Delete this section if no resources are required.
+| Track in Git | Keep outside Git |
+|---|---|
+| Code, configs, environment locks, paper source, small results, run references | Datasets, downloaded weights, checkpoints, full logs, caches, secrets |
 
-### scripts/
-Executable code (Python/Bash/etc.) that can be run directly to perform specific operations.
+Never hardcode machine paths in project code. Resolve storage from `RESEARCH_ROOT`, `PROJECTS_ROOT`, `SHARED_ROOT`, `DATASETS_ROOT`, `PRETRAINED_ROOT`, `RUNS_ROOT`, and `SCRATCH_ROOT`.
 
-**Examples from other skills:**
-- PDF skill: `fill_fillable_fields.py`, `extract_form_field_info.py` - utilities for PDF manipulation
-- DOCX skill: `document.py`, `utilities.py` - Python modules for document processing
+## Storage Safety
 
-**Appropriate for:** Python scripts, shell scripts, or any executable code that performs automation, data processing, or specific operations.
+Reject a world-writable directory without the sticky bit for unique checkpoints: another user may rename or delete entries. Do not infer usability from capacity alone; inspect complete path permissions and ACLs. Prefer a safe home-backed NVMe now over an inaccessible empty disk. Move physical storage later only behind the same logical variables.
 
-**Note:** Scripts may be executed without loading into context, but can still be read by Codex for patching or environment adjustments.
+Treat backups, archive trees, DVC, MLflow, W&B, object storage, and model registries as opt-in only. Introduce them only when the user explicitly requests their tradeoffs.
 
-### references/
-Documentation and reference material intended to be loaded into context to inform Codex's process and thinking.
+## Example
 
-**Examples from other skills:**
-- Product management: `communication.md`, `context_building.md` - detailed workflow guides
-- BigQuery: API reference documentation and query examples
-- Finance: Schema documentation, company policies
+After confirming that home is the safe large filesystem, run:
 
-**Appropriate for:** In-depth documentation, API references, database schemas, comprehensive guides, or any detailed information that Codex should reference while working.
+~~~bash
+python3 scripts/setup_workspace.py \
+  --root "$HOME/research" \
+  --env-file "$HOME/.config/research-workspace/env.sh" \
+  --shell-rc "$HOME/.bashrc"
+~~~
 
-### assets/
-Files not intended to be loaded into context, but rather used within the output Codex produces.
+Then verify `findmnt -T "$RUNS_ROOT"`, `namei -l "$RUNS_ROOT"`, and run the setup command again. Require the second run to report only `UNCHANGED` actions.
 
-**Examples from other skills:**
-- Brand styling: PowerPoint template files (.pptx), logo files
-- Frontend builder: HTML/React boilerplate project directories
-- Typography: Font files (.ttf, .woff2)
+## Quick Reference
 
-**Appropriate for:** Templates, boilerplate code, document templates, images, icons, fonts, or any files meant to be copied or used in the final output.
+| Question | Default |
+|---|---|
+| Where does code live? | `projects/<paper>/` |
+| Where are shared inputs? | `shared/datasets/` and `shared/pretrained/` |
+| Where is a checkpoint? | Its originating run |
+| How is a paper model retained? | `paper-runs.yaml` plus `KEEP` |
+| What may be deleted freely? | `scratch/` |
 
----
+## Red Flags and Common Mistakes
 
-**Not every skill requires all three types of resources.**
+Stop if a proposal adds status folders, a model registry, a backup policy, or an archive without being asked; writes to a mount root because it looks empty; hardcodes `/home` or `/data` paths in project code; commits checkpoints to Git; or calls setup complete without verifying a second run.
